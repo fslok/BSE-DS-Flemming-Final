@@ -20,6 +20,6 @@ Scripts: [1. Download annual FRED data](scripts/01_download_fred.R) · [2. Check
 
 [3. Prepare forecasting features and splits](scripts/03_features_split.R) creates the one-year-ahead dataset and training-only sentiment checks.
 
-[4. Graph sentiment and fertility](scripts/04_graphs.R) creates a scatterplot of prior-year UMCSENT and current-year TFR using the training period. It can run directly after script 02.
+[4. Graph sentiment and fertility](scripts/04_graphs.R) creates two training-period plots of prior-year UMCSENT and current-year TFR: a scatter with a best-fit line and a chronological path, both labelled by TFR year. It can run directly after script 02. [Data notes](data/README.md#data-notes-for-the-draft) record coverage, units and survey limitations.
 
 The main comparison will use long-history predictors: OLS, LASSO, a small regression tree and random forest, alongside a previous-TFR benchmark. The optional shorter-history comparison will be kept in separate scripts when modelling begins.

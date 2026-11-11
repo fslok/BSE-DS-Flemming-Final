@@ -50,8 +50,25 @@ source("scripts/03_features_split.R")
 
 Script 03 saves sample counts and correlations in `outputs/tables/` and a training scatterplot in `outputs/figures/`. Model estimation and final test evaluation are the next step.
 
-## Simple scatterplot
+## Sentiment and fertility graphs
 
-Run `source("scripts/04_graphs.R")` from the repository root after script 02. It reads the merged annual data, aligns sentiment in t-1 with TFR in t, and saves `outputs/figures/umcsent_tfr_scatter.png`. The graph uses training outcome years 1961-2004 only. This standalone script uses base R and does not require script 03 or change any data files.
+Run `source("scripts/04_graphs.R")` from the repository root after script 02. It reads the merged annual data and aligns sentiment in t-1 with TFR in t. It saves two graphs in `outputs/figures/`: `umcsent_tfr_scatter.png` adds a descriptive OLS best-fit line; `umcsent_tfr_path.png` connects consecutive years with arrows. Both label every point with its TFR outcome year and use training outcomes 1961-2004 only. This standalone script uses base R and does not require script 03 or change any data files.
+
+The chronological path shows changes in the paired observations, not causal direction. Sentiment's one-year lead is imposed by the alignment. A leftward segment means prior-year sentiment fell; a downward segment means current-year TFR fell. The fitted line is descriptive, not a forecasting-model evaluation.
 
 The agreed main model comparison is OLS, LASSO, a small regression tree and random forest, plus a previous-TFR benchmark. Use the 27-predictor long-history list. The expanded preparation currently in script 03 is optional; separate expanded-analysis scripts will be added at the modelling stage if needed.
+
+## Data notes for the draft
+
+- The current merged sample has 65 years (1960-2024), TFR and 33 predictors. TFR and the 26 main macro predictors have complete coverage. The seven optional series have missing early years before their histories begin; no internal gaps were found. The merged values match the saved annual source files.
+- UMCSENT has four native observations per year during 1960-1977 and twelve per year from 1978. The early annual averages therefore use fewer surveys. Retain the series and disclose this difference to the TA. It combines current conditions and expectations, rather than measuring fertility intentions.
+- TFR is much higher in the early 1960s than later in the sample. The 2024 value (1.6265) is below the 1961-2004 training minimum (1.738), which limits the ability of standard regression trees and random forests to extrapolate to new lows.
+- Keep genuine shock observations, including the large 2020 movements in unemployment, saving and claims. Mark events on suitable plots rather than adding future-shock information to forecasts.
+- CPI, core CPI and rent CPI are price indices, not inflation rates. Annual ICSA is average weekly claims, not a yearly total. Payrolls and housing quantities are in thousands; income measures and nominal earnings retain their stated units.
+- Keep the official indices as source data. If we use inflation as a predictor, derive annual percentage changes from the indices in feature preparation. To retain a 1961 outcome with lagged 1960 inflation, we would need the 1959 index observation. No new data or price transformations have been added for this graph update. See the [BLS explanation of CPI changes](https://www.bls.gov/cpi/technical-notes/).
+
+## Checks to report with the first OLS
+
+Use the training sample and the predictors actually included in the regression. Report a predictor correlation matrix, flag large absolute correlations, check for exact linear dependence, and report variance inflation factors (VIFs) where the model is full rank. Covariance magnitudes depend on units; correlations and VIFs are more useful for comparing overlap. Do not automatically remove a predictor solely because it exceeds a correlation threshold.
+
+The initial check of source levels over predictor years 1960-2003 found correlations of 0.9994 for headline/core CPI, 0.9983 for women's 16+/25-54 participation, 0.9977 for real GDP/disposable income per capita, and 0.9918 for federal funds/3-month Treasury rates. Shared trends contribute. Recalculate diagnostics after choosing transformations and the OLS specification; these are preliminary descriptive checks, not model results.
