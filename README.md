@@ -15,3 +15,5 @@ I collect 'standard' macro variables commonly used in forecasting project like t
 I believe that allows this project to go from a straight forward data descriptive process measuring 'people do not have children because of economic stress' to a more interesting 'besides outright economic factors, is there an underlying sociology (housing loan pressures, household breadwinner dynamics, marriage rates) that we can measure to predict TFR?'
 
 [Variable list and FRED sources](data/variables.md) · [Data preparation](data/README.md)
+
+Scripts: [1. Download FRED data](scripts/01_download_fred.R) · [2. Annualize and merge](scripts/02_clean_merge.R). Review first; run in that order from the repository root.
