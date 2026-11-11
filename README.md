@@ -19,3 +19,7 @@ I believe that allows this project to go from a straight forward data descriptiv
 Scripts: [1. Download annual FRED data](scripts/01_download_fred.R) · [2. Check and merge](scripts/02_clean_merge.R). Review first; run in that order from the repository root.
 
 [3. Prepare forecasting features and splits](scripts/03_features_split.R) creates the one-year-ahead dataset and training-only sentiment checks.
+
+[4. Graph sentiment and fertility](scripts/04_graphs.R) creates a scatterplot of prior-year UMCSENT and current-year TFR using the training period. It can run directly after script 02.
+
+The main comparison will use long-history predictors: OLS, LASSO, a small regression tree and random forest, alongside a previous-TFR benchmark. The optional shorter-history comparison will be kept in separate scripts when modelling begins.

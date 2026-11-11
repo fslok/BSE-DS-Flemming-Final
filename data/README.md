@@ -49,3 +49,9 @@ source("scripts/03_features_split.R")
 - Fit scaling and any model tuning using training/trial information only. The revised annual histories make this a retrospective forecasting exercise, not a real-time vintage reconstruction.
 
 Script 03 saves sample counts and correlations in `outputs/tables/` and a training scatterplot in `outputs/figures/`. Model estimation and final test evaluation are the next step.
+
+## Simple scatterplot
+
+Run `source("scripts/04_graphs.R")` from the repository root after script 02. It reads the merged annual data, aligns sentiment in t-1 with TFR in t, and saves `outputs/figures/umcsent_tfr_scatter.png`. The graph uses training outcome years 1961-2004 only. This standalone script uses base R and does not require script 03 or change any data files.
+
+The agreed main model comparison is OLS, LASSO, a small regression tree and random forest, plus a previous-TFR benchmark. Use the 27-predictor long-history list. The expanded preparation currently in script 03 is optional; separate expanded-analysis scripts will be added at the modelling stage if needed.
