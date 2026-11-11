@@ -1,5 +1,7 @@
 # Data
 
+For the complete analysis, run [Final_Project.R](../Final_Project.R). It reads the assembled CSV directly from a fixed GitHub snapshot and needs neither these local folders nor an API key. The collection and preparation instructions below explain how the source files were produced.
+
 - `raw/annual/<FRED_CODE>.csv`: annual observations downloaded directly from FRED.
 - `raw/annual/series_metadata.csv`: original and downloaded frequencies, units, source links, download date, and file checksums.
 - `us_fertility_annual.csv`: one annual dataset for R, with `year`, `tfr`, and 33 predictors.
@@ -48,7 +50,7 @@ source("scripts/03_features_split.R")
 - Retain shock years. Mark oil shocks, the Great Recession, and COVID on plots, and discuss any associated residuals or forecast errors after models are fixed; do not use knowledge of future shocks as forecast inputs.
 - Fit scaling and any model tuning using training/trial information only. The revised annual histories make this a retrospective forecasting exercise, not a real-time vintage reconstruction.
 
-Script 03 saves sample counts and correlations in `outputs/tables/` and a training scatterplot in `outputs/figures/`. Model estimation and final test evaluation are the next step.
+Script 03 saves sample counts and correlations in `outputs/tables/` and a training scatterplot in `outputs/figures/`. The combined `Final_Project.R` now includes model estimation and final test evaluation.
 
 ## Sentiment and fertility graphs
 
@@ -67,8 +69,14 @@ The agreed main model comparison is OLS, LASSO, a small regression tree and rand
 - CPI, core CPI and rent CPI are price indices, not inflation rates. Annual ICSA is average weekly claims, not a yearly total. Payrolls and housing quantities are in thousands; income measures and nominal earnings retain their stated units.
 - Keep the official indices as source data. If we use inflation as a predictor, derive annual percentage changes from the indices in feature preparation. To retain a 1961 outcome with lagged 1960 inflation, we would need the 1959 index observation. No new data or price transformations have been added for this graph update. See the [BLS explanation of CPI changes](https://www.bls.gov/cpi/technical-notes/).
 
-## Checks to report with the first OLS
+## OLS checks and model comparison
 
-Use the training sample and the predictors actually included in the regression. Report a predictor correlation matrix, flag large absolute correlations, check for exact linear dependence, and report variance inflation factors (VIFs) where the model is full rank. Covariance magnitudes depend on units; correlations and VIFs are more useful for comparing overlap. Do not automatically remove a predictor solely because it exceeds a correlation threshold.
+The combined script uses the training sample and the predictors actually included in the regression. It reports a predictor correlation matrix, flags absolute correlations above 0.95, checks for exact linear dependence, and reports variance inflation factors (VIFs). Covariance magnitudes depend on units; correlations and VIFs are more useful for comparing overlap. It does not automatically remove a predictor solely because it exceeds the correlation threshold.
 
 The initial check of source levels over predictor years 1960-2003 found correlations of 0.9994 for headline/core CPI, 0.9983 for women's 16+/25-54 participation, 0.9977 for real GDP/disposable income per capita, and 0.9918 for federal funds/3-month Treasury rates. Shared trends contribute. Recalculate diagnostics after choosing transformations and the OLS specification; these are preliminary descriptive checks, not model results.
+
+The combined script fits OLS, LASSO, a depth-two regression tree and a 500-tree random forest using the same 27 inputs. It tunes LASSO's penalty, the tree's minimum leaf size (5, 10 or 15 years), and the forest's predictors per split (3, 9 or 27) on the chronological trial period. No random cross-validation or out-of-bag model selection is used.
+
+Both target specifications are evaluated: TFR levels and annual percentage changes. Percentage-change forecasts are converted back to TFR using observed prior-year TFR before calculating RMSE. The previous-TFR benchmark is included once. The winning method and target are chosen on trial RMSE, then all fixed specifications are refitted on 1961-2014 and evaluated on 2015-2024. Test results do not change the selected winner. These are successive one-year forecasts with observed prior-year inputs and fixed coefficients within each evaluation period.
+
+The combined script saves graphs, model inputs, collinearity checks, tuning tables, trial/test forecasts and scores, coefficients, forest importance and R package versions in the results folder it prints. Source CSVs remain unchanged. The shorter-history variables and inflation transformations requiring additional 1959 data remain outside this main analysis.
