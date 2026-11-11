@@ -1,5 +1,5 @@
 # Run from the repository root: source("scripts/01_download_fred.R")
-# Downloads native-frequency observations from 1960; no annualization here.
+# Downloads annual observations from FRED; FRED calculates the averages.
 # API reference: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
 
 if (!file.exists("data/variables.md")) stop("Set the working directory to the repository root.")
@@ -57,8 +57,10 @@ download_fred <- function() {
   groups <- c("target", rep("core", 25), rep("additional", 8))
   start_date <- "1960-01-01"
   as_of_date <- as.character(Sys.Date())
+  end_date <- paste0(as.integer(format(Sys.Date(), "%Y")) - 1L, "-12-31")
   retrieved_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
-  raw_dir <- file.path("data", "raw")
+  # Keep the previous native-frequency downloads untouched in data/raw/.
+  raw_dir <- file.path("data", "raw", "annual")
   dir.create(raw_dir, recursive = TRUE, showWarnings = FALSE)
 
   # Keep the key and full request URLs out of messages and saved files.
@@ -87,7 +89,8 @@ download_fred <- function() {
     info <- fred_get("series", id)$seriess
     result <- fred_get(
       "series/observations", id, observation_start = start_date,
-      observation_end = as_of_date, units = "lin", sort_order = "asc", limit = 100000
+      observation_end = end_date, units = "lin", frequency = "a",
+      aggregation_method = "avg", sort_order = "asc", limit = 100000
     )
     x <- result$observations
     if (!is.data.frame(info) || nrow(info) != 1L || info$id != id ||
@@ -102,15 +105,23 @@ download_fred <- function() {
       stop("Unexpected observation columns or duplicate dates for ", id, call. = FALSE)
     }
 
-    # Preserve FRED values, including "." for missing, in the raw files.
+    dates <- as.Date(x$date)
+    years <- as.integer(format(dates, "%Y"))
+    if (anyNA(dates) || anyDuplicated(years) || any(format(dates, "%m-%d") != "01-01")) {
+      stop("FRED did not return one annual observation per year for ", id, call. = FALSE)
+    }
+
+    # Annual sources pass through unchanged. All other averages come from FRED.
+    # Preserve FRED's rounding and missing-value rules; do not recalculate here.
     observations[[i]] <- x[c("date", "value", "realtime_start", "realtime_end")]
     usable <- !is.na(x$value) & x$value != "."
     metadata[[i]] <- data.frame(
       series_id = id, group = groups[i], title = info$title,
-      frequency = info$frequency, frequency_short = info$frequency_short,
+      frequency = "Annual", frequency_short = "A", aggregation_method = "avg",
+      native_frequency = info$frequency, native_frequency_short = info$frequency_short,
       units = info$units, seasonal_adjustment = info$seasonal_adjustment,
       last_updated = info$last_updated, as_of_date = as_of_date,
-      retrieved_at_utc = retrieved_at, requested_start = start_date,
+      retrieved_at_utc = retrieved_at, requested_start = start_date, requested_end = end_date,
       observations = nrow(x), nonmissing = sum(usable),
       first_nonmissing = if (any(usable)) min(x$date[usable]) else NA_character_,
       last_nonmissing = if (any(usable)) max(x$date[usable]) else NA_character_,
@@ -126,7 +137,7 @@ download_fred <- function() {
   }
   metadata$md5 <- unname(tools::md5sum(paths))
   write.csv(metadata, file.path(raw_dir, "series_metadata.csv"), row.names = FALSE, na = "")
-  message("Saved ", length(series_ids), " raw series and series_metadata.csv.")
+  message("Saved ", length(series_ids), " annual FRED series in ", raw_dir, ".")
 }
 
 download_fred()

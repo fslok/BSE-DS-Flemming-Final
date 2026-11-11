@@ -1,29 +1,30 @@
 # Data
 
-- `raw/<FRED_CODE>.csv`: observations at their original frequency, from 1960 onward.
-- `raw/series_metadata.csv`: frequencies, units, source links, download date, coverage, and file checksums.
-- `us_fertility_annual.csv`: the merged annual dataset for R.
-- `annual_coverage.csv`: completeness and observation counts for every series/year.
-- [variables.md](variables.md): target and candidate predictors, with FRED source links.
+- `raw/annual/<FRED_CODE>.csv`: annual observations downloaded directly from FRED.
+- `raw/annual/series_metadata.csv`: original and downloaded frequencies, units, source links, download date, and file checksums.
+- `us_fertility_annual.csv`: one annual dataset for R, with `year`, `tfr`, and 33 predictors.
+- `annual_coverage.csv`: availability of each series/year, not a full-year completeness test.
+- [variables.md](variables.md): the 34 series and their original frequencies.
 
-## Run after reviewing the scripts
+## Run
 
-Use the repository root as the R working directory. Put your replacement API key alone in local `secret.txt`, or set the `FRED_API_KEY` environment variable. The key is never written to the downloaded files.
+Use the repository root as the R working directory. Put your replacement API key alone in local `secret.txt`, or set `FRED_API_KEY`.
 
 ```r
 source("scripts/01_download_fred.R")
 source("scripts/02_clean_merge.R")
 ```
 
-The download script installs `httr2` if needed and requests the 34 listed series through the [FRED observations API](https://fred.stlouisfed.org/docs/api/fred/series_observations.html), with [series metadata](https://fred.stlouisfed.org/docs/api/fred/series.html). Rerunning it refreshes the raw files. The cleaning script uses base R and makes no network requests.
+Script 01 installs `httr2` if needed and requests `frequency = "a"`, `aggregation_method = "avg"`, and `units = "lin"` from the [FRED API](https://fred.stlouisfed.org/docs/api/fred/series_observations.html). This is Annual/Average in the FRED interface. Annual source series pass through unchanged. The current unfinished calendar year is excluded.
 
-## Merge rules
+Script 02 checks the files and joins by year, from 1960 through the latest available TFR year. It preserves FRED's annual values and missingness, without averaging or interpolation. Predictors retain their FRED codes as column names. It makes no network requests.
 
-1. One row per calendar year, from 1960 through the latest nonmissing TFR year, capped at the last completed calendar year when downloaded. Years are sorted and unique.
-2. Columns: `year`, `tfr` (FRED `SPDYNTFRTINUSA`), then one column per predictor named with its FRED code.
-3. Keep annual sources unchanged. Average monthly, quarterly, and weekly observations within each calendar year; do not sum rates, indexes, or annualized flows.
-4. Require all 12 distinct months, all 4 distinct quarters, or 1 annual observation, with no missing values. Weekly series need 52-53 nonmissing observations, dates in the first and last seven days of the year, and no gap over ten days. This conservative rule allows reporting weekday changes; failed years remain `NA` and are flagged in the coverage file. For `ICSA`, the result is average weekly claims, not total annual claims.
-5. Keep unavailable values as `NA`. Do not interpolate or drop early years just because an additional series starts later. Check irregular early `UMCSENT` coverage separately.
-6. Preserve source units in this CSV. Build growth rates, inflation rates, ratios, and forecast lags separately in R. Calendar-year alignment alone does not establish availability at the forecast date; check release timing before modelling.
+The previous native-frequency downloads in `raw/` are preserved. The updated scripts use only `raw/annual/`; rerun both scripts once to switch over. Future runs refresh the annual downloads and merged outputs.
 
-The scripts are prepared for review; observations have not been downloaded or merged. These are revised data as of the recorded download date, not historical real-time vintages.
+## Interpretation
+
+FRED applies its own [missing-value rules](https://fred.stlouisfed.org/help/data/understanding-the-data/how-are-missing-values-treated-in-average-sum-and-end-of-period-aggregation-methods-2/) and [first/last-period thresholds](https://fred.stlouisfed.org/help/data/understanding-the-data/how-are-missing-values-determined-for-the-first-and-last-observations-3). An annual value can use fewer than a full year's observations: weekly boundary years require 39 observations, and interior missing values are ignored. Thus early mortgage and consumer-sentiment values may appear where the previous script returned `NA`.
+
+FRED also [rounds aggregated values](https://fred.stlouisfed.org/help/data/understanding-the-data/how-is-the-number-of-decimal-places-determined-for-aggregated-values), so small differences from the previous R averages are expected. All units are preserved: CPI is an index, rates are percentages, and annual `ICSA` is average weekly claims.
+
+Growth rates, ratios, and forecast lags come later. These are revised data as of the recorded download date; calendar-year alignment does not establish real-time availability.

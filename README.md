@@ -16,4 +16,4 @@ I believe that allows this project to go from a straight forward data descriptiv
 
 [Variable list and FRED sources](data/variables.md) · [Data preparation](data/README.md)
 
-Scripts: [1. Download FRED data](scripts/01_download_fred.R) · [2. Annualize and merge](scripts/02_clean_merge.R). Review first; run in that order from the repository root.
+Scripts: [1. Download annual FRED data](scripts/01_download_fred.R) · [2. Check and merge](scripts/02_clean_merge.R). Review first; run in that order from the repository root.
