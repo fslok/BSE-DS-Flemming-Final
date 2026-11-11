@@ -17,3 +17,5 @@ I believe that allows this project to go from a straight forward data descriptiv
 [Variable list and FRED sources](data/variables.md) · [Data preparation](data/README.md)
 
 Scripts: [1. Download annual FRED data](scripts/01_download_fred.R) · [2. Check and merge](scripts/02_clean_merge.R). Review first; run in that order from the repository root.
+
+[3. Prepare forecasting features and splits](scripts/03_features_split.R) creates the one-year-ahead dataset and training-only sentiment checks.

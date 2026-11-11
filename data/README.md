@@ -27,4 +27,25 @@ FRED applies its own [missing-value rules](https://fred.stlouisfed.org/help/data
 
 FRED also [rounds aggregated values](https://fred.stlouisfed.org/help/data/understanding-the-data/how-is-the-number-of-decimal-places-determined-for-aggregated-values), so small differences from the previous R averages are expected. All units are preserved: CPI is an index, rates are percentages, and annual `ICSA` is average weekly claims.
 
-Growth rates, ratios, and forecast lags come later. These are revised data as of the recorded download date; calendar-year alignment does not establish real-time availability.
+The merged file retains source levels; script 03 creates growth rates, ratios, and forecast lags separately. These are revised data as of the recorded download date; calendar-year alignment does not establish real-time availability.
+
+## Forecasting features and split
+
+After scripts 01 and 02, run:
+
+```r
+source("scripts/03_features_split.R")
+```
+
+- Main target: TFR in year t. Secondary target: 100 * (TFR_t / TFR_(t-1) - 1).
+- Every predictor uses calendar year t-1. Split by outcome year: training 1961-2004, trial 2005-2014, test 2015-2024.
+- The held-out periods will contain successive one-year-ahead forecasts using each preceding year's observations, not a ten-year forecast made at one starting date.
+- Four feature ideas: previous TFR, women's/men's weekly earnings ratio, log real disposable income per capita, and log inflation-adjusted house-price index.
+- `forecast_data.csv` contains the aligned data. Use `predictor_dictionary.csv` to select inputs; do not include the outcome, year labels, or eligibility flags as predictors.
+- The main input list has 27 predictors and 44/10/10 training/trial/test rows. The expanded list has 33 predictors but only 17/10/10 rows, because lagged house prices begin with outcome year 1988. Compare expanded and core specifications on the same shorter sample; use a small OLS specification, since unrestricted OLS cannot uniquely estimate 33 slopes from 17 observations.
+- The earnings ratio compares aggregate weekly earnings among full-time workers; it is not an adjusted pay-gap estimate.
+- Sentiment correlations and scatterplots use training outcomes only. A pre-specified coverage check starts with outcome year 1979, when the preceding year's sentiment has monthly observations.
+- Retain shock years. Mark oil shocks, the Great Recession, and COVID on plots, and discuss any associated residuals or forecast errors after models are fixed; do not use knowledge of future shocks as forecast inputs.
+- Fit scaling and any model tuning using training/trial information only. The revised annual histories make this a retrospective forecasting exercise, not a real-time vintage reconstruction.
+
+Script 03 saves sample counts and correlations in `outputs/tables/` and a training scatterplot in `outputs/figures/`. Model estimation and final test evaluation are the next step.
