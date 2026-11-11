@@ -1,0 +1,12 @@
+# Local credentials
+secret.txt
+.Renviron
+.env
+.env.*
+!.env.example
+
+# Local R session files
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
