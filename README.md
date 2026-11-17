@@ -1,6 +1,6 @@
 # BSE-DS-Flemming-Final
 
-## Run the complete project
+## Run the submission
 
 Open [Final_Project.R](Final_Project.R) and run it, or paste this into R:
 
@@ -8,9 +8,22 @@ Open [Final_Project.R](Final_Project.R) and run it, or paste this into R:
 source("https://raw.githubusercontent.com/fslok/BSE-DS-Flemming-Final/main/Final_Project.R")
 ```
 
-It starts with `read.csv()` from GitHub, then runs the annotated cleaning, graphing and regression sections. No working-directory change, local input files or FRED API key is needed. Internet access is required; missing R packages install automatically. Results are saved in `BSE_TFR_results` under the current working folder (or a temporary folder if that is not writable); the script prints the full location.
+[Final_Project.R](Final_Project.R) is the single submission script. It reads the assembled CSV directly from a fixed GitHub snapshot, checks the data, constructs the lagged features, runs the regressions and creates all figures. Run it from any folder. Internet access is required, and missing R packages install automatically.
 
-The complete script uses the long-history sample and compares OLS, LASSO, a small regression tree and random forest with a previous-TFR benchmark. It tries both TFR levels and percentage changes, scoring forecasts in births per woman. Settings and the selected model are chosen on 2005-2014, then frozen before the 2015-2024 test. The CSV URL pins the collected data snapshot so everyone starts with the same values.
+The comparison includes carry-forward, fitted AR(1), OLS, LASSO, a shallow regression tree and random forest. It evaluates 15 specifications using TFR alone or TFR plus 26 macro indicators, with both levels and annual percentage changes as targets. Training covers 1961–2004, trial 2005–2014 and test 2015–2024. The fitted TFR-only comparisons were added after the test outcomes had been examined.
+
+Outputs go into `BSE_TFR_results` in the current folder, with a temporary-folder fallback when necessary. The script prints the location. It saves the combined RMSE table, 300 annual forecasts, selected settings, coefficients, training correlations/VIFs, tree rules and R session information. The `figures` subfolder contains eight figures in PNG and PDF:
+
+- Annual TFR, 1960–2024.
+- Training TFR histogram.
+- Lagged sentiment scatter with fitted line and year labels.
+- Sentiment scatter connecting consecutive years.
+- Training sentiment plots for TFR levels and changes.
+- Trial-selected model's test forecasts and errors.
+- Random-forest predictor importance.
+- Carry-forward, AR(1) and macro change-tree forecasts.
+
+The numbered scripts below record earlier collection and analysis steps. The submission runs entirely from `Final_Project.R`.
 
 ## Project
 
@@ -36,4 +49,4 @@ Collection scripts (not needed to run the complete project): [1. Download annual
 
 [4. Graph sentiment and fertility](scripts/04_graphs.R) creates two training-period plots of prior-year UMCSENT and current-year TFR: a scatter with a best-fit line and a chronological path, both labelled by TFR year. It can run directly after script 02. [Data notes](data/README.md#data-notes-for-the-draft) record coverage, units and survey limitations.
 
-The standalone scripts above preserve the earlier preparation steps. [Final_Project.R](Final_Project.R) combines the main workflow and models in one file. Any optional shorter-history comparison will be kept separate.
+[Final_Project.R](Final_Project.R) contains the complete long-history analysis, including the autoregression comparisons and annual TFR graph. The shorter-history model remains an optional extension.
