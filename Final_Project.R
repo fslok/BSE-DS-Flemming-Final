@@ -1,5 +1,5 @@
 # BSE Intro to Data Science final project - Flemming Slok
-# One-year-ahead US fertility forecasts.
+# One-year-ahead US fertility forecasts with annual expanding-window refits.
 # Does adding 26 macro indicators improve on forecasts using last year's TFR?
 # Run this entire file from any folder. The assembled CSV is the only input.
 # Results, diagnostics and figures are saved in BSE_TFR_results.
@@ -122,8 +122,9 @@ write.csv(sentiment_results, file.path(output_dir, "sentiment_training_correlati
           row.names = FALSE)
 
 ########################### 4. REGRESSIONS ####################################
-# All errors are measured in births per woman. Convert percent-change forecasts
-# back to levels using the TFR observed one year before each forecast.
+# Expanding window: use outcomes from 1961 through t-1 to forecast year t.
+# The predictor row for t contains only measurements from t-1.
+# These are revised-data forecasts, not forecasts using historical data vintages.
 as_tfr <- function(prediction, target, lag_tfr) {
   if (target == "tfr_yoy_pct") return(lag_tfr * (1 + prediction / 100))
   as.numeric(prediction)
@@ -137,141 +138,150 @@ settings <- expand.grid(target = c("tfr", "tfr_yoy_pct"), inputs = names(input_s
                         stringsAsFactors = FALSE)
 settings$minbucket <- settings$mtry <- NA_integer_
 settings$lambda <- NA_real_
-lambda_paths <- list()
-forecasts <- ar_coefficients <- data.frame()
-tuning_results <- linear_coefficients <- lasso_coefficients <- data.frame()
-final_models <- list()
 
-# Trial: fit on 1961-2004 and select settings using forecasts for 2005-2014.
-# Test: refit once through 2014 using those settings, then forecast 2015-2024.
-# These test years have already been examined in the original project.
+# Construct each LASSO grid using only the initial training sample.
+# Reuse exactly this grid at every origin, with scaling fitted anew each time.
+lambda_paths <- list()
+for (target in c("tfr", "tfr_yoy_pct")) {
+  initial_lasso <- glmnet::glmnet(as.matrix(train[, full_inputs]), train[[target]],
+                                 alpha = 1, standardize = TRUE, maxit = 1000000)
+  stopifnot(initial_lasso$jerr == 0)
+  lambda_paths[[target]] <- initial_lasso$lambda
+}
+
+forecast_schedule <- data.frame(
+  period = c(rep("trial", nrow(trial)), rep("test", nrow(test))),
+  year = c(trial$year, test$year))
+forecast_schedule$fit_start <- min(d$year)
+forecast_schedule$fit_through <- forecast_schedule$year - 1L
+forecast_schedule$n_train <- forecast_schedule$fit_through - min(d$year) + 1L
+forecast_schedule$input_year <- forecast_schedule$year - 1L
+write.csv(forecast_schedule, file.path(output_dir, "forecast_schedule.csv"), row.names = FALSE)
+
+forecasts <- ar_coefficients <- data.frame()
+tuning_results <- trial_candidate_forecasts <- data.frame()
+linear_coefficients <- lasso_coefficients <- data.frame()
+final_models <- list()
+tree_rules <- character()
+
+# Trial selects settings using pooled errors across ten yearly refits.
+# Test keeps those settings fixed but also refits before every forecast.
+# The test years have already been examined in the earlier project version.
 for (period in c("trial", "test")) {
   tuning <- period == "trial"
-  fit_data <- if (tuning) train else rbind(train, trial)
   upcoming <- if (tuning) trial else test
-
-  # Persistence forecasts this year's TFR by carrying forward last year's value.
   forecasts <- rbind(forecasts, data.frame(period, year = upcoming$year, target = "tfr",
-    inputs = "TFR_only", model = "Persistence", actual = upcoming$tfr, predicted = upcoming$tfr_lag1))
+    inputs = "TFR_only", model = "Persistence", actual = upcoming$tfr,
+    predicted = upcoming$tfr_lag1))
 
   for (i in seq_len(nrow(settings))) {
     target <- settings$target[i]
     inputs <- settings$inputs[i]
     vars <- input_sets[[inputs]]
     formula <- reformulate(vars, response = target)
-    x <- as.matrix(fit_data[, vars, drop = FALSE])
-    new_x <- as.matrix(upcoming[, vars, drop = FALSE])
-    predictions <- list()
-
-    # In levels, OLS with one lag is the fitted AR(1): TFR[t] = alpha + rho * TFR[t-1] + error[t].
-    # For percent change, the same predictor is last year's TFR level.
-    if (inputs == "TFR_only" && target == "tfr") {
-      linear_fit <- lm(tfr ~ tfr_lag1, data = fit_data)
-      linear_name <- "AR(1)"
-      ar_coefficients <- rbind(ar_coefficients, data.frame(period, fit_through = max(fit_data$year),
-        alpha = unname(coef(linear_fit)[1]), rho = unname(coef(linear_fit)["tfr_lag1"])))
-    } else {
-      linear_fit <- lm(formula, data = fit_data)
-      linear_name <- "OLS"
-    }
-    predictions[[linear_name]] <- predict(linear_fit, newdata = upcoming)
-    linear_coefficients <- rbind(linear_coefficients, data.frame(
-      period, target, inputs, model = linear_name,
-      term = names(coef(linear_fit)), coefficient = unname(coef(linear_fit))))
-    if (inputs == "TFR_plus_macro") {
-      if (tuning) {
-        capture.output(summary(linear_fit),
-          file = file.path(output_dir, paste0("ols_training_", target, ".txt")))
-      } else {
-        write.csv(data.frame(term = names(coef(linear_fit)), coefficient = coef(linear_fit)),
-          file.path(output_dir, paste0("ols_coefficients_", target, ".csv")), row.names = FALSE)
-      }
-    }
-    if (!tuning) final_models[[paste(inputs, target, linear_name, sep = "__")]] <- linear_fit
-
-    # LASSO shrinks coefficients in the full 27-predictor model.
-    if (inputs == "TFR_plus_macro") {
-      if (tuning) {
-        lasso <- glmnet::glmnet(x, fit_data[[target]], alpha = 1, standardize = TRUE)
-        lambda_paths[[target]] <- lasso$lambda
-        candidates <- predict(lasso, newx = new_x)
-        errors <- apply(candidates, 2, trial_rmse, target = target)
-        best <- which.min(errors)
-        settings$lambda[i] <- lasso$lambda[best]
-        predictions$LASSO <- candidates[, best]
-        tuning_results <- rbind(tuning_results, data.frame(
-          inputs, target, model = "LASSO", parameter = "lambda",
-          value = lasso$lambda, trial_RMSE = errors))
-      } else {
-        lasso <- glmnet::glmnet(x, fit_data[[target]], alpha = 1, standardize = TRUE,
-                               lambda = lambda_paths[[target]])
-        predictions$LASSO <- predict(lasso, newx = new_x, s = settings$lambda[i])[, 1]
-        beta <- as.matrix(coef(lasso, s = settings$lambda[i]))
-        lasso_coefficients <- rbind(lasso_coefficients, data.frame(
-          target, term = rownames(beta), coefficient = beta[, 1]))
-        final_models[[paste(inputs, target, "LASSO", sep = "__")]] <- lasso
-      }
-    }
-
-    # Tree with up to two splits along any path. Ties favor larger leaves.
+    linear_name <- if (inputs == "TFR_only" && target == "tfr") "AR(1)" else "OLS"
     buckets <- if (tuning) c(15L, 10L, 5L) else settings$minbucket[i]
-    candidates <- matrix(NA_real_, nrow(upcoming), length(buckets))
-    for (j in seq_along(buckets)) {
-      tree <- rpart::rpart(formula, data = fit_data, method = "anova",
-        control = rpart::rpart.control(maxdepth = 2, minbucket = buckets[j],
-                                      minsplit = 2 * buckets[j], cp = 0, xval = 0))
-      candidates[, j] <- predict(tree, newdata = upcoming)
-    }
-    best <- 1L
-    if (tuning) {
-      errors <- apply(candidates, 2, trial_rmse, target = target)
-      best <- which.min(errors)
-      tuning_results <- rbind(tuning_results, data.frame(
-        inputs, target, model = "Tree", parameter = "minbucket",
-        value = buckets, trial_RMSE = errors))
-    }
-    settings$minbucket[i] <- buckets[best]
-    predictions$Tree <- candidates[, best]
-    # In the final refit there is one candidate, with the frozen minimum leaf size.
-    if (!tuning) final_models[[paste(inputs, target, "Tree", sep = "__")]] <- tree
-
-    # A one-predictor forest must use mtry = 1. The macro forest tries 3, 9, and 27.
     mtry <- if (inputs == "TFR_only") 1L else c(3L, 9L, 27L)
     if (!tuning) mtry <- settings$mtry[i]
-    candidates <- matrix(NA_real_, nrow(upcoming), length(mtry))
-    for (j in seq_along(mtry)) {
-      set.seed(2026)
-      forest <- randomForest::randomForest(x = x, y = fit_data[[target]],
-        ntree = 500, mtry = mtry[j], nodesize = 5)
-      candidates[, j] <- predict(forest, newdata = new_x)
+    candidates <- list()
+    candidates[[linear_name]] <- matrix(NA_real_, nrow(upcoming), 1)
+    if (inputs == "TFR_plus_macro") {
+      penalties <- if (tuning) lambda_paths[[target]] else settings$lambda[i]
+      candidates$LASSO <- matrix(NA_real_, nrow(upcoming), length(penalties))
     }
-    best <- 1L
-    if (tuning) {
-      errors <- apply(candidates, 2, trial_rmse, target = target)
-      best <- which.min(errors)
-      tuning_results <- rbind(tuning_results, data.frame(
-        inputs, target, model = "Random_forest", parameter = "mtry",
-        value = mtry, trial_RMSE = errors))
-    }
-    settings$mtry[i] <- mtry[best]
-    predictions$Random_forest <- candidates[, best]
-    if (!tuning) {
-      final_models[[paste(inputs, target, "Random_forest", sep = "__")]] <- forest
-      if (inputs == "TFR_plus_macro") {
-        importance <- randomForest::importance(forest)
-        write.csv(data.frame(predictor = rownames(importance), importance = importance[, 1]),
-          file.path(output_dir, paste0("forest_importance_", target, ".csv")), row.names = FALSE)
+    candidates$Tree <- matrix(NA_real_, nrow(upcoming), length(buckets))
+    candidates$Random_forest <- matrix(NA_real_, nrow(upcoming), length(mtry))
+
+    for (k in seq_len(nrow(upcoming))) {
+      next_year <- upcoming[k, , drop = FALSE]
+      year <- next_year$year
+      fit_data <- d[d$year < year, ]
+      fit_through <- max(fit_data$year)
+      stopifnot(fit_through == year - 1L, min(fit_data$year) == 1961L,
+                nrow(fit_data) == year - 1961L)
+      x <- as.matrix(fit_data[, vars, drop = FALSE])
+      new_x <- as.matrix(next_year[, vars, drop = FALSE])
+
+      # OLS with lagged TFR alone and a level target is the fitted AR(1).
+      linear_fit <- lm(formula, data = fit_data)
+      candidates[[linear_name]][k, 1] <- predict(linear_fit, newdata = next_year)
+      linear_coefficients <- rbind(linear_coefficients, data.frame(
+        period, year, fit_through, target, inputs, model = linear_name,
+        term = names(coef(linear_fit)), coefficient = unname(coef(linear_fit))))
+      if (linear_name == "AR(1)") {
+        ar_coefficients <- rbind(ar_coefficients, data.frame(period, year, fit_through,
+          alpha = unname(coef(linear_fit)[1]), rho = unname(coef(linear_fit)["tfr_lag1"])))
       }
+      if (inputs == "TFR_plus_macro" && tuning && k == 1L) {
+        capture.output(summary(linear_fit),
+          file = file.path(output_dir, paste0("ols_training_", target, ".txt")))
+      }
+      if (!tuning) final_models[[paste(inputs, target, linear_name, sep = "__")]] <- linear_fit
+
+      if (inputs == "TFR_plus_macro") {
+        lasso <- glmnet::glmnet(x, fit_data[[target]], alpha = 1, standardize = TRUE,
+                               lambda = lambda_paths[[target]], maxit = 1000000)
+        stopifnot(lasso$jerr == 0, length(lasso$lambda) == length(lambda_paths[[target]]))
+        candidates$LASSO[k, ] <- as.numeric(predict(lasso, newx = new_x, s = penalties))
+        if (!tuning) {
+          beta <- as.matrix(coef(lasso, s = settings$lambda[i]))
+          lasso_coefficients <- rbind(lasso_coefficients, data.frame(
+            period, year, fit_through, target, term = rownames(beta), coefficient = beta[, 1]))
+          final_models[[paste(inputs, target, "LASSO", sep = "__")]] <- lasso
+        }
+      }
+
+      # Shallow tree, with leaf size chosen in the trial period.
+      for (j in seq_along(buckets)) {
+        tree <- rpart::rpart(formula, data = fit_data, method = "anova",
+          control = rpart::rpart.control(maxdepth = 2, minbucket = buckets[j],
+                                        minsplit = 2 * buckets[j], cp = 0, xval = 0))
+        candidates$Tree[k, j] <- predict(tree, newdata = next_year)
+      }
+      if (!tuning) {
+        final_models[[paste(inputs, target, "Tree", sep = "__")]] <- tree
+        if (inputs == "TFR_plus_macro" && target == "tfr_yoy_pct") {
+          tree_rules <- c(tree_rules, paste("Forecast year:", year, "- fit through:", fit_through),
+                          capture.output(print(tree)), "")
+        }
+      }
+
+      # Forests use the same reproducible seed for every fitted candidate.
+      for (j in seq_along(mtry)) {
+        set.seed(2026)
+        forest <- randomForest::randomForest(x = x, y = fit_data[[target]],
+          ntree = 500, mtry = mtry[j], nodesize = 5)
+        candidates$Random_forest[k, j] <- predict(forest, newdata = new_x)
+      }
+      if (!tuning) final_models[[paste(inputs, target, "Random_forest", sep = "__")]] <- forest
     }
 
-    for (model in names(predictions)) {
+    # Select settings only after collecting all ten trial forecasts per candidate.
+    for (model in names(candidates)) {
+      best <- 1L
+      if (model %in% c("LASSO", "Tree", "Random_forest") && tuning) {
+        values <- switch(model, LASSO = penalties, Tree = buckets, Random_forest = mtry)
+        parameter <- switch(model, LASSO = "lambda", Tree = "minbucket", Random_forest = "mtry")
+        errors <- apply(candidates[[model]], 2, trial_rmse, target = target)
+        best <- which.min(errors)
+        settings[[parameter]][i] <- values[best]
+        tuning_results <- rbind(tuning_results, data.frame(
+          inputs, target, model, parameter, value = values, trial_RMSE = errors))
+        for (j in seq_along(values)) {
+          trial_candidate_forecasts <- rbind(trial_candidate_forecasts, data.frame(
+            inputs, target, model, parameter, value = values[j], year = upcoming$year,
+            actual = upcoming$tfr,
+            predicted = as_tfr(candidates[[model]][, j], target, upcoming$tfr_lag1)))
+        }
+      }
       forecasts <- rbind(forecasts, data.frame(period, year = upcoming$year, target, inputs, model,
-        actual = upcoming$tfr, predicted = as_tfr(predictions[[model]], target, upcoming$tfr_lag1),
-        row.names = NULL))
+        actual = upcoming$tfr,
+        predicted = as_tfr(candidates[[model]][, best], target, upcoming$tfr_lag1), row.names = NULL))
     }
+    message(period, ": ", inputs, " / ", target, " - completed ", nrow(upcoming), " yearly refits")
   }
-  # Freeze the candidate with the smallest trial RMSE before the test loop starts.
-  # This reproduces selection on trial within the previously examined sample.
+
+  # Freeze model, target and input-set choice before entering the test loop.
   if (tuning) {
     trial_rows <- forecasts[forecasts$period == "trial", ]
     trial_rows$error <- trial_rows$actual - trial_rows$predicted
@@ -287,6 +297,10 @@ for (period in c("trial", "test")) {
 }
 
 ########################### 5. RESULTS ########################################
+forecasts$fit_through <- forecast_schedule$fit_through[match(forecasts$year, forecast_schedule$year)]
+forecasts$n_train <- forecast_schedule$n_train[match(forecasts$year, forecast_schedule$year)]
+stopifnot(all(forecasts$fit_through == forecasts$year - 1L),
+          all(forecasts$n_train == forecasts$year - 1961L))
 forecasts$error <- forecasts$actual - forecasts$predicted
 stopifnot(all(is.finite(forecasts$error)))
 scores <- aggregate(error ~ target + inputs + model + period, data = forecasts,
@@ -308,6 +322,8 @@ write.csv(forecasts, file.path(output_dir, "annual_forecasts.csv"), row.names = 
 write.csv(ar_coefficients, file.path(output_dir, "ar1_coefficients.csv"), row.names = FALSE)
 write.csv(settings, file.path(output_dir, "selected_settings.csv"), row.names = FALSE)
 write.csv(tuning_results, file.path(output_dir, "tuning_results.csv"), row.names = FALSE)
+write.csv(trial_candidate_forecasts, file.path(output_dir, "trial_candidate_forecasts.csv"),
+          row.names = FALSE)
 write.csv(linear_coefficients, file.path(output_dir, "linear_coefficients.csv"), row.names = FALSE)
 write.csv(lasso_coefficients, file.path(output_dir, "lasso_coefficients.csv"), row.names = FALSE)
 
@@ -324,14 +340,29 @@ chosen <- forecasts[forecasts$period == "test" & forecasts$target == chosen_targ
                    forecasts$inputs == chosen_inputs & forecasts$model == chosen_model, ]
 write.csv(chosen, file.path(output_dir, "selected_model_test_forecasts.csv"), row.names = FALSE)
 
-# Retain the fitted tree rules and their implied annual growth forecasts.
-growth_tree <- final_models[["TFR_plus_macro__tfr_yoy_pct__Tree"]]
-capture.output(print(growth_tree), file = file.path(output_dir, "tree_rules_tfr_yoy_pct.txt"))
-tree_forecasts <- data.frame(year = test$year, actual = test$tfr,
-  lagged_consumption = test$PCECC96_lag1, lagged_housing_starts = test$HOUST_lag1,
-  predicted_change_pct = as.numeric(predict(growth_tree, newdata = test)))
-tree_forecasts$predicted <- test$tfr_lag1 * (1 + tree_forecasts$predicted_change_pct / 100)
+# Each year's growth-tree forecast comes from that year's own fitted tree.
+writeLines(tree_rules, file.path(output_dir, "tree_rules_tfr_yoy_pct.txt"))
+tree_forecasts <- forecasts[forecasts$period == "test" &
+  forecasts$inputs == "TFR_plus_macro" & forecasts$target == "tfr_yoy_pct" &
+  forecasts$model == "Tree", ]
+tree_forecasts <- tree_forecasts[match(test$year, tree_forecasts$year), ]
+tree_forecasts$predicted_change_pct <- 100 * (tree_forecasts$predicted / test$tfr_lag1 - 1)
 write.csv(tree_forecasts, file.path(output_dir, "tree_test_forecasts.csv"), row.names = FALSE)
+
+# These supplementary summaries describe only the last fit, through 2023,
+# used to forecast 2024. The yearly coefficients are saved separately above.
+for (target in c("tfr", "tfr_yoy_pct")) {
+  last_linear <- linear_coefficients[linear_coefficients$period == "test" &
+    linear_coefficients$year == max(test$year) & linear_coefficients$target == target &
+    linear_coefficients$inputs == "TFR_plus_macro", ]
+  write.csv(last_linear, file.path(output_dir, paste0("ols_coefficients_", target, ".csv")),
+            row.names = FALSE)
+  forest <- final_models[[paste("TFR_plus_macro", target, "Random_forest", sep = "__")]]
+  importance <- randomForest::importance(forest)
+  write.csv(data.frame(year = max(test$year), fit_through = max(test$year) - 1L,
+    predictor = rownames(importance), importance = importance[, 1]),
+    file.path(output_dir, paste0("forest_importance_", target, ".csv")), row.names = FALSE)
+}
 
 ############################ 6. GRAPHS ########################################
 # The figures use the already assembled data and forecasts.
@@ -444,13 +475,13 @@ for (format in c("png", "pdf")) {
   abline(0, 1, lty = 2)
   plot(chosen$year, chosen$error, type = "o", pch = 20, col = "darkblue",
        xlab = "TFR outcome year", ylab = "Actual minus forecast",
-       main = "Final test forecast errors")
+       main = "Expanding-window forecast errors")
   abline(h = 0, lty = 2)
   dev.off()
 
-  # Importance ranks predictors within each macro forest.
+  # Importance describes the final annual refit, not every test forecast.
   open_figure("forest_importance", 13.8, 5.5, format)
-  par(mfrow = c(1, 2), mar = c(5, 12, 3, 1))
+  par(mfrow = c(1, 2), mar = c(5, 12, 4, 1))
   for (target in c("tfr", "tfr_yoy_pct")) {
     key <- paste("TFR_plus_macro", target, "Random_forest", sep = "__")
     importance <- randomForest::importance(final_models[[key]])[, 1]
@@ -458,7 +489,7 @@ for (format in c("png", "pdf")) {
     importance <- rev(importance)
     names(importance) <- sub("_lag1$", "", names(importance))
     barplot(importance, horiz = TRUE, las = 1, col = "#215678", border = NA,
-            cex.names = 0.85, main = paste("Macro forest:", target),
+            cex.names = 0.85, main = paste("Macro forest:", target, "\nFit through 2023; forecast 2024"),
             xlab = "Mean decrease in residual sum of squares")
   }
   dev.off()
@@ -485,7 +516,7 @@ for (format in c("png", "pdf")) {
   matplot(test$year, compared, type = "l", lty = c(1, 2, 3, 1),
           lwd = c(2, 1.5, 1.5, 2), col = colors,
           xlab = "TFR outcome year", ylab = "Births per woman",
-          main = "One-year test forecasts")
+          main = "Expanding-window test forecasts")
   legend("topright", c("Actual", "Carry-forward", "AR(1)", "Macro change tree"),
          col = colors, lty = c(1, 2, 3, 1), lwd = c(2, 1.5, 1.5, 2),
          bty = "n", cex = 0.85)
@@ -498,6 +529,6 @@ for (format in c("png", "pdf")) {
 }
 
 capture.output(sessionInfo(), file = file.path(output_dir, "sessionInfo.txt"))
-message("Finished: 15 forecast specifications and 8 figures in PNG and PDF.")
+message("Finished: 15 expanding-window forecast specifications and 8 figures in PNG and PDF.")
 message("Tables and estimates: ", normalizePath(output_dir, winslash = "/"))
 message("Figures: ", normalizePath(figure_dir, winslash = "/"))
